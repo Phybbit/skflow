@@ -64,6 +64,8 @@ def logistic_regression(X, y, class_weight=None):
     with tf.variable_scope('logistic_regression'):
         tf.histogram_summary('logistic_regression.X', X)
         tf.histogram_summary('logistic_regression.y', y)
+        # import pdb; pdb.set_trace()
+
         weights = tf.get_variable('weights', [X.get_shape()[1],
                                               y.get_shape()[-1]])
         bias = tf.get_variable('bias', [y.get_shape()[-1]])
@@ -122,6 +124,7 @@ def get_rnn_model(rnn_size, cell_type, num_layers, input_op_fn,
     """
     def rnn_estimator(X, y):
         """RNN estimator with target predictor function on top."""
+        # import pdb; pdb.set_trace()
         X = input_op_fn(X)
         if cell_type == 'rnn':
             cell_fn = rnn_cell.BasicRNNCell

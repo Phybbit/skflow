@@ -36,6 +36,7 @@ from skflow.io.data_feeder import setup_train_data_feeder
 from skflow.io.data_feeder import setup_predict_data_feeder
 from skflow.ops.dropout_ops import DROPOUTS
 
+import pdb
 
 class TensorFlowEstimator(BaseEstimator):
     """Base class for all TensorFlow estimators.
@@ -80,7 +81,7 @@ class TensorFlowEstimator(BaseEstimator):
     def __init__(self, model_fn, n_classes, tf_master="", batch_size=32,
                  steps=200, optimizer="SGD",
                  learning_rate=0.1, tf_random_seed=42, continue_training=False,
-                 num_cores=4, verbose=1, early_stopping_rounds=None,
+                 num_cores=8, verbose=1, early_stopping_rounds=None,
                  max_to_keep=5, keep_checkpoint_every_n_hours=10000):
         self.n_classes = n_classes
         self.tf_master = tf_master
@@ -124,6 +125,7 @@ class TensorFlowEstimator(BaseEstimator):
                 tf.histogram_summary("y", self._out)
 
             # Create model's graph.
+            # pdb.set_trace()
             self._model_predictions, self._model_loss = self.model_fn(
                 self._inp, self._out)
 
@@ -132,6 +134,12 @@ class TensorFlowEstimator(BaseEstimator):
 
             # Set up a single operator to merge all the summaries
             self._summaries = tf.merge_all_summaries()
+
+            with tf.name_scope("test") as scope:
+                if self.n_classes > 0:
+                    correct_prediction = tf.equal(tf.argmax(self._out,1), tf.argmax(self._model_predictions,1))
+                    self._cv_accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
+                    self._cv_accuracy_summary = tf.scalar_summary("cv accuracy", self._cv_accuracy)
 
             # Create trainer and augment graph with gradients and optimizer.
             # Additionally creates initialization ops.
@@ -157,7 +165,7 @@ class TensorFlowEstimator(BaseEstimator):
             os.path.join(logdir, datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')),
             graph_def=self._session.graph_def)
 
-    def fit(self, X, y, logdir=None):
+    def fit(self, X, y, logdir=None, cv_X=None, cv_y=None):
         """Builds a neural network model given provided `model_fn` and training
         data X and y.
 
@@ -184,6 +192,15 @@ class TensorFlowEstimator(BaseEstimator):
         self._data_feeder = setup_train_data_feeder(X, y,
                                                     self.n_classes,
                                                     self.batch_size)
+
+
+        self._cv_data_feeder = None
+        if cv_X is not None and cv_y is not None:
+            # import pdb; pdb.set_trace()
+            self._cv_data_feeder = setup_train_data_feeder(cv_X, cv_y,
+                                                           self.n_classes,
+                                                           cv_y.size)
+
         if not self.continue_training or not self._initialized:
             # Sets up model and trainer.
             self._setup_training()
@@ -204,15 +221,23 @@ class TensorFlowEstimator(BaseEstimator):
             self._summary_writer = None
 
         # Train model for given number of steps.
-        self._trainer.train(self._session,
-                            self._data_feeder.get_feed_dict_fn(
-                                self._inp, self._out),
-                            self.steps,
-                            self._summary_writer,
-                            self._summaries,
-                            verbose=self.verbose,
-                            early_stopping_rounds=self._early_stopping_rounds,
-                            feed_params_fn=self._data_feeder.get_feed_params)
+        for i in range(100):
+            self._trainer.train(self._session,
+                                self._data_feeder.get_feed_dict_fn(
+                                    self._inp, self._out),
+                                self.steps // 100,
+                                self._summary_writer,
+                                self._summaries,
+                                verbose=self.verbose,
+                                early_stopping_rounds=self._early_stopping_rounds,
+                                feed_params_fn=self._data_feeder.get_feed_params)
+
+            if self._cv_data_feeder is not None and self.n_classes > 0:
+                # import pdb; pdb.set_trace()
+                cv_feed_dict = self._cv_data_feeder.get_feed_dict_fn(self._inp, self._out)()
+                cv_acc, cv_acc_summ, global_step = self._session.run([self._cv_accuracy, self._cv_accuracy_summary, self._global_step], feed_dict=cv_feed_dict)
+                self._summary_writer.add_summary(cv_acc_summ, global_step)
+
         return self
 
     def partial_fit(self, X, y):
@@ -442,4 +467,3 @@ class TensorFlowEstimator(BaseEstimator):
         estimator = getattr(estimators, class_name)(**model_def)
         estimator._restore(path)
         return estimator
-
